@@ -16,6 +16,7 @@ if not tf.test.gpu_device_name():
 else:
     print('Default GPU Device: {}'.format(tf.test.gpu_device_name()))
 
+FREEZE_WEIGHTS = True
 
 def load_vgg(sess, vgg_path):
     """
@@ -26,14 +27,25 @@ def load_vgg(sess, vgg_path):
     """
     # TODO: Implement function
     #   Use tf.saved_model.loader.load to load the model and weights
+    
     vgg_tag = 'vgg16'
+    
+    tf.saved_model.loader.load(sess, vgg_tag, vgg_path)
+    
     vgg_input_tensor_name = 'image_input:0'
     vgg_keep_prob_tensor_name = 'keep_prob:0'
     vgg_layer3_out_tensor_name = 'layer3_out:0'
     vgg_layer4_out_tensor_name = 'layer4_out:0'
     vgg_layer7_out_tensor_name = 'layer7_out:0'
     
-    return None, None, None, None, None
+    vgg = tf.get_default_graph()
+    vgg_input = tf.get_tensor_by_name(vgg_input_tensor_name)
+    vgg_keep_prob = tf.get_tensor_by_name(vgg_keep_prob_tensor_name)
+    vgg_layer3 = tf.get_tensor_by_name(vgg_layer3_out_tensor_name)
+    vgg_layer4 = tf.get_tensor_by_name(vgg_layer4_out_tensor_name)
+    vgg_layer5 = tf.get_tensor_by_name(vgg_layer7_out_tensor_name)
+    
+    return vgg_input, vgg_keep_prob, vgg_layer3, vgg_layer4, vgg_layer5
 tests.test_load_vgg(load_vgg, tf)
 
 
@@ -47,7 +59,25 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
     :return: The Tensor for the last layer of output
     """
     # TODO: Implement function
-    return None
+    
+    if FREEZE_WEIGHTS:
+        vgg_layer7_out = tf.stop_gradient(vgg_layer7_out)
+        vgg_layer4_out = tf.stop_gradient(vgg_layer4_out)
+        vgg_layer3_out = tf.stop_gradient(vgg_layer3_out)
+    
+    conv_1x1_layer7 = tf.nn.conv2d(vgg_layer7_out, num_classes, 1, padding='same', name="transpose_conv_1x1_layer7")
+    conv_1x1_layer4 = tf.nn.conv2d(vgg_layer4_out, num_classes, 1, padding='same', name="transpose_conv_1x1_layer4")
+    conv_1x1_layer3 = tf.nn.conv2d(vgg_layer3_out, num_classes, 1, padding='same', name="transpose_conv_1x1_layer3")
+    
+    vgg_layer7_transpose = tf.nn.conv2d_transpose(conv_1x1_layer7, num_classes, 4, 2, padding='same', name="transpose_vgg_layer7")
+    
+    vgg_skip_layer4 = tf.nn.add(vgg_layer7_transpose, conv_1x1_layer4)
+    vgg_layer4_transpose = tf.nn.conv2d_transpose(vgg_skip_layer4, num_classes, 4, 2, padding='same', name="transpose_vgg_layer4")
+    
+    vgg_skip_layer3 = tf.nn.add(vgg_layer4_transpose, conv_1x1_layer3)
+    vgg_layer3_transpose = tf.nn.conv2d_transpose(vgg_skip_layer3, num_classes, 16, 8, padding='same', name="transpose_vgg_layer3")
+    
+    return vgg_layer3_transpose
 tests.test_layers(layers)
 
 
@@ -61,7 +91,30 @@ def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
     :return: Tuple of (logits, train_op, cross_entropy_loss)
     """
     # TODO: Implement function
-    return None, None, None
+    
+    cross_entropy = tf.nn.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=nn_last_layer, labels=correct_label),
+                                        name="cross_entropy")
+    
+    logits = tf.reshape(nn_last_layer, (-1, num_classes))
+    label = tf.reshape(correct_label, (-1, num_classes))
+    prediction = tf.equal(tf.argmax(logits, 1), tf.argmax(label, 1))
+    accuracy_operation = tf.reduce_mean(tf.cast(prediction, tf.float32), name="accuracy_operation")
+
+    optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
+    update_operations = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+
+    if FREEZE_WEIGHTS:
+        trainable_variables = []
+        for variable in tf.trainable_variables():
+            if "transpose_conv_1x1" in variable.name or 'beta' in variable.name or "transpose_vgg" in variable.name:
+                trainable_variables.append(variable)
+        with tf.control_dependencies(update_operations):
+            training_operation = optmizer.minimize(cross_entropy, var_list=trainable_variables, name="training_operation")
+    else:
+        with tf.control_dependencies(update_operations):
+            training_operation = optimizer.minimize(cross_entropy, name="training_operation")
+
+    return nn_last_layer, training_operation, cross_entropy, accuracy_operation
 tests.test_optimize(optimize)
 
 
@@ -81,6 +134,10 @@ def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_l
     :param learning_rate: TF Placeholder for learning rate
     """
     # TODO: Implement function
+    
+    for epoch in range(epochs):
+        for (X,y) in get_batches_fn(batch_size):
+            pass
     pass
 tests.test_train_nn(train_nn)
 
