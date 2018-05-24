@@ -17,6 +17,8 @@ else:
     print('Default GPU Device: {}'.format(tf.test.gpu_device_name()))
 
 FREEZE_WEIGHTS = True
+EPOCHS = 1
+BATCH_SIZE = 1
 
 def load_vgg(sess, vgg_path):
     """
@@ -43,9 +45,9 @@ def load_vgg(sess, vgg_path):
     vgg_keep_prob = tf.get_tensor_by_name(vgg_keep_prob_tensor_name)
     vgg_layer3 = tf.get_tensor_by_name(vgg_layer3_out_tensor_name)
     vgg_layer4 = tf.get_tensor_by_name(vgg_layer4_out_tensor_name)
-    vgg_layer5 = tf.get_tensor_by_name(vgg_layer7_out_tensor_name)
+    vgg_layer7 = tf.get_tensor_by_name(vgg_layer7_out_tensor_name)
     
-    return vgg_input, vgg_keep_prob, vgg_layer3, vgg_layer4, vgg_layer5
+    return vgg_input, vgg_keep_prob, vgg_layer3, vgg_layer4, vgg_layer7
 tests.test_load_vgg(load_vgg, tf)
 
 
@@ -59,17 +61,18 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
     :return: The Tensor for the last layer of output
     """
     # TODO: Implement function
+    global FREEZE_WEIGHTS
     
     if FREEZE_WEIGHTS:
         vgg_layer7_out = tf.stop_gradient(vgg_layer7_out)
         vgg_layer4_out = tf.stop_gradient(vgg_layer4_out)
         vgg_layer3_out = tf.stop_gradient(vgg_layer3_out)
     
-    conv_1x1_layer7 = tf.nn.conv2d(vgg_layer7_out, num_classes, 1, padding='same', name="transpose_conv_1x1_layer7")
+    #conv_1x1_layer7 = tf.nn.conv2d(vgg_layer7_out, num_classes, 1, padding='same', name="transpose_conv_1x1_layer7")
     conv_1x1_layer4 = tf.nn.conv2d(vgg_layer4_out, num_classes, 1, padding='same', name="transpose_conv_1x1_layer4")
     conv_1x1_layer3 = tf.nn.conv2d(vgg_layer3_out, num_classes, 1, padding='same', name="transpose_conv_1x1_layer3")
     
-    vgg_layer7_transpose = tf.nn.conv2d_transpose(conv_1x1_layer7, num_classes, 4, 2, padding='same', name="transpose_vgg_layer7")
+    vgg_layer7_transpose = tf.nn.conv2d_transpose(vgg_layer7_out, num_classes, 4, 2, padding='same', name="transpose_vgg_layer7")
     
     vgg_skip_layer4 = tf.nn.add(vgg_layer7_transpose, conv_1x1_layer4)
     vgg_layer4_transpose = tf.nn.conv2d_transpose(vgg_skip_layer4, num_classes, 4, 2, padding='same', name="transpose_vgg_layer4")
@@ -91,6 +94,7 @@ def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
     :return: Tuple of (logits, train_op, cross_entropy_loss)
     """
     # TODO: Implement function
+    global FREEZE_WEIGHTS
     
     cross_entropy = tf.nn.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=nn_last_layer, labels=correct_label),
                                         name="cross_entropy")
@@ -106,7 +110,7 @@ def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
     if FREEZE_WEIGHTS:
         trainable_variables = []
         for variable in tf.trainable_variables():
-            if "transpose_conv_1x1" in variable.name or 'beta' in variable.name or "transpose_vgg" in variable.name:
+            if "transpose_conv_1x1" in variable.name or 'beta' in variable.name or "transpose_vgg" in variable.name or "Adam" in variable.name:
                 trainable_variables.append(variable)
         with tf.control_dependencies(update_operations):
             training_operation = optmizer.minimize(cross_entropy, var_list=trainable_variables, name="training_operation")
@@ -143,6 +147,11 @@ tests.test_train_nn(train_nn)
 
 
 def run():
+    
+    global FREEZE_WEIGHTS
+    global EPOCHS
+    global BATCH_SIZE
+    
     num_classes = 2
     image_shape = (160, 576)
     data_dir = './data'
@@ -160,14 +169,32 @@ def run():
         # Path to vgg model
         vgg_path = os.path.join(data_dir, 'vgg')
         # Create function to get batches
-        get_batches_fn = helper.gen_batch_function(os.path.join(data_dir, 'data_road/training'), image_shape)
+        #get_batches_fn = helper.gen_batch_function(os.path.join(data_dir, 'data_road/training'), image_shape)
 
         # OPTIONAL: Augment Images for better results
         #  https://datascience.stackexchange.com/questions/5224/how-to-prepare-augment-images-for-neural-network
 
         # TODO: Build NN using load_vgg, layers, and optimize function
+        data_folder = os.path.join(data_dir, 'data_road/training')
+        image_paths = glob(os.path.join(data_folder, 'image_2', '*.png'))
+
+        training_image_paths, validation_image_paths = train_test_split(image_paths, test_size=0.2)
 
         # TODO: Train NN using the train_nn function
+        vgg_input, vgg_keep_prob, vgg_layer3, vgg_layer4, vgg_layer7 = load_vgg(sess, vgg_path)
+        output_layer = layers(vgg_layer3, vgg_layer4, vgg_layer7, num_classes)
+        label = tf.placeholder(tf.int8, (None,) + image_shape + (num_classes,), name="label")
+        learning_rate = tf.placeholder(tf.float32, [], name="learning_rate")
+        output_layer, training_operation, cross_entropy, accuracy_operation = optimize(output_layer, label, learning_rate,
+                                                                           num_classes)
+        if FREEZE_WEIGHTS:
+            variable_initializers = [variable.initializer for variable in tf.global_variables() if "transpose_conv_1x1" in variable.name or 'beta' in variable.name or "transpose_vgg" in variable.name or "Adam" in variable.name]
+            sess.run(variable_initializers)
+        else:
+            sess.run(tf.global_variables_initializer())
+        
+        train_nn(sess, EPOCHS, BATCH_SIZE, get_batches_fn, training_operation, cross_entropy, vgg_input,
+             label, keep_prob, learning_rate)
 
         # TODO: Save inference data using helper.save_inference_samples
         #  helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image)
