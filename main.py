@@ -19,6 +19,8 @@ else:
 FREEZE_WEIGHTS = True
 EPOCHS = 1
 BATCH_SIZE = 1
+KEEP_PROB = 0.5
+LEARNING_RATE = 0.001
 
 def load_vgg(sess, vgg_path):
     """
@@ -122,8 +124,10 @@ def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
 tests.test_optimize(optimize)
 
 
-def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_loss, input_image,
-             correct_label, keep_prob, learning_rate):
+#def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_loss, input_image,
+#             correct_label, keep_prob, learning_rate):
+def train_nn(sess, epochs, batch_size, train_op, cross_entropy_loss, input_image,
+             correct_label, keep_prob, learning_rate, training_image_paths, validation_image_paths, data_dir, image_shape):
     """
     Train neural network and print out the loss during training.
     :param sess: TF Session
@@ -139,10 +143,53 @@ def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_l
     """
     # TODO: Implement function
     
+    global KEEP_PROB
+    global LEARNING_RATE
+    
+    training_losses = []
+    training_accuracies = []
+    validation_losses = []
+    validation_accuracies = []
+    
+    get_batches_fn = helper.gen_batch_function(os.path.join(data_dir, 'data_road/training'), image_shape)
+    
     for epoch in range(epochs):
-        for (X,y) in get_batches_fn(batch_size):
-            pass
-    pass
+        for (X, y) in get_batches_fn(batch_size, training_image_paths):
+            loss, accuracy = sess.run([cross_entropy_loss, train_op], feed_dict={
+                input_image: X,
+                correct_label: y,
+                keep_prob: KEEP_PROB,
+                learning_rate: LEARNING_RATE,
+                is_training:True
+            })
+        
+        training_loss = 0
+        training_accuracy = 0
+        for X, y in get_batches_fn(batch_size, training_image_paths):
+            loss, accuracy = sess.run([loss_op, accuracy_op], feed_dict={input_image: X, correct_label: y,
+                                                                     keep_prob: 1.0, is_training:False})
+            training_loss += (loss * X_batch.shape[0])
+            training_accuracy += (accuracy * X_batch.shape[0])
+        
+        training_losses.append(training_loss/(int(math.floor(len(training_image_paths)/batch_size)*batch_size)))
+        training_accuracies.append(training_accuracy/(int(math.floor(len(training_image_paths)/batch_size)*batch_size)))
+        
+        validation_loss = 0
+        validation_accuracy = 0
+        for X, y in get_batches_fn(batch_size, validation_image_paths):
+            loss, accuracy = sess.run([loss_op, accuracy_op], feed_dict={input_image: X, correct_label: y,
+                                                                     keep_prob: 1.0, is_training:False})
+            validation_loss += (loss * X_batch.shape[0])
+            validation_accuracy += (accuracy * X_batch.shape[0])
+        
+        validation_losses.append(validation_loss/(int(math.floor(len(validation_image_paths)/batch_size)*batch_size)))
+        validation_accuracies.append(validation_accuracy/(int(math.floor(len(validation_image_paths)/batch_size)*batch_size)))
+
+        print(
+            "Epoch %d:" % (epoch + 1),
+            "Training loss: %.4f, accuracy: %.2f" % (training_loss, training_accuracy),
+            "Validation loss: %.4f, accuracy: %.2f" % (validation_loss, validation_accuracy)
+        )
 tests.test_train_nn(train_nn)
 
 
@@ -193,8 +240,8 @@ def run():
         else:
             sess.run(tf.global_variables_initializer())
         
-        train_nn(sess, EPOCHS, BATCH_SIZE, get_batches_fn, training_operation, cross_entropy, vgg_input,
-             label, keep_prob, learning_rate)
+        train_nn(sess, EPOCHS, BATCH_SIZE, training_operation, cross_entropy, vgg_input,
+             label, vgg_keep_prob, learning_rate, training_image_paths, validation_image_paths, data_dir, image_shape)
 
         # TODO: Save inference data using helper.save_inference_samples
         #  helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image)
@@ -203,4 +250,5 @@ def run():
 
 
 if __name__ == '__main__':
+    
     run()
