@@ -19,10 +19,11 @@ else:
     print('Default GPU Device: {}'.format(tf.test.gpu_device_name()))
 
 FREEZE_WEIGHTS = True
-EPOCHS = 15
-BATCH_SIZE = 4
-KEEP_PROB = 1.0 #0.65
-LEARNING_RATE = 0.0003
+EPOCHS = 10
+BATCH_SIZE = 8
+KEEP_PROB_FREEZE = 1.0
+KEEP_PROB = 0.5
+LEARNING_RATE = 0.0005
 
 def load_vgg(sess, vgg_path):
     """
@@ -72,21 +73,21 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes, keep_pro
         vgg_layer3_out = tf.stop_gradient(vgg_layer3_out)
     
     #conv_1x1_layer7 = tf.layers.conv2d(vgg_layer7_out, num_classes, 1, padding='same', name="transpose_conv_1x1_layer7")
-    conv_1x1_layer4 = tf.layers.conv2d(vgg_layer4_out, num_classes, 1, padding='same', name="transpose_conv_1x1_layer4")
-    conv_1x1_layer3 = tf.layers.conv2d(vgg_layer3_out, num_classes, 1, padding='same', name="transpose_conv_1x1_layer3")
+    conv_1x1_layer4 = tf.layers.conv2d(vgg_layer4_out, num_classes, 1, padding='same', name="transpose_conv_1x1_layer4", activation=tf.nn.relu)
+    conv_1x1_layer3 = tf.layers.conv2d(vgg_layer3_out, num_classes, 1, padding='same', name="transpose_conv_1x1_layer3", activation=tf.nn.relu)
     
     conv_1x1_layer4_dropout = tf.nn.dropout(conv_1x1_layer4, keep_prob=keep_prob)
     conv_1x1_layer3_dropout = tf.nn.dropout(conv_1x1_layer3, keep_prob=keep_prob)
 
-    vgg_layer7_transpose = tf.layers.conv2d_transpose(vgg_layer7_out, num_classes, 4, strides=(2,2), padding='same', name="transpose_vgg_layer7")
+    vgg_layer7_transpose = tf.layers.conv2d_transpose(vgg_layer7_out, num_classes, 4, strides=(2,2), padding='same', name="transpose_vgg_layer7", activation=tf.nn.relu)
     vgg_layer7_transpose_dropout = tf.nn.dropout(vgg_layer7_transpose, keep_prob=keep_prob)
     
     vgg_skip_layer4 = tf.add(vgg_layer7_transpose_dropout, conv_1x1_layer4_dropout)
-    vgg_layer4_transpose = tf.layers.conv2d_transpose(vgg_skip_layer4, num_classes, 4, strides=(2,2), padding='same', name="transpose_vgg_layer4")
+    vgg_layer4_transpose = tf.layers.conv2d_transpose(vgg_skip_layer4, num_classes, 4, strides=(2,2), padding='same', name="transpose_vgg_layer4", activation=tf.nn.relu)
     vgg_layer4_transpose_dropout = tf.nn.dropout(vgg_layer4_transpose, keep_prob=keep_prob)
 
     vgg_skip_layer3 = tf.add(vgg_layer4_transpose, conv_1x1_layer3_dropout)
-    vgg_layer3_transpose = tf.layers.conv2d_transpose(vgg_skip_layer3, num_classes, 32, strides=(8,8), padding='same', name="transpose_vgg_layer3")
+    vgg_layer3_transpose = tf.layers.conv2d_transpose(vgg_skip_layer3, num_classes, 32, strides=(8,8), padding='same', name="transpose_vgg_layer3", activation=tf.nn.relu)
     #vgg_layer3_transpose_dropout = tf.nn.dropout(vgg_layer3_transpose, keep_prob=keep_prob)
     
     return vgg_layer3_transpose
@@ -136,7 +137,7 @@ def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
 #def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_loss, input_image,
 #             correct_label, keep_prob, learning_rate):
 def train_nn(sess, epochs, batch_size, train_op, accuracy_operation, cross_entropy_loss, input_image,
-             correct_label, keep_prob, learning_rate, training_image_paths, validation_image_paths, data_dir, image_shape):
+             correct_label, keep_prob_freeze, keep_prob, learning_rate, training_image_paths, validation_image_paths, data_dir, image_shape):
     """
     Train neural network and print out the loss during training.
     :param sess: TF Session
@@ -167,6 +168,7 @@ def train_nn(sess, epochs, batch_size, train_op, accuracy_operation, cross_entro
             loss, accuracy = sess.run([cross_entropy_loss, train_op], feed_dict={
                 input_image: X,
                 correct_label: y,
+                keep_prob_freeze: KEEP_PROB_FREEZE,
                 keep_prob: KEEP_PROB,
                 learning_rate: LEARNING_RATE
             })
@@ -175,7 +177,7 @@ def train_nn(sess, epochs, batch_size, train_op, accuracy_operation, cross_entro
         training_accuracy = 0
         for X, y in get_batches_fn(batch_size, training_image_paths):
             loss, accuracy = sess.run([cross_entropy_loss, accuracy_operation], feed_dict={input_image: X, correct_label: y,
-                                                                     keep_prob: 1.0})
+                                                                     keep_prob_freeze: 1.0, keep_prob: 1.0})
             training_loss += (loss * X.shape[0])
             training_accuracy += (accuracy * X.shape[0])
         
@@ -188,7 +190,7 @@ def train_nn(sess, epochs, batch_size, train_op, accuracy_operation, cross_entro
         validation_accuracy = 0
         for X, y in get_batches_fn(batch_size, validation_image_paths):
             loss, accuracy = sess.run([cross_entropy_loss, accuracy_operation], feed_dict={input_image: X, correct_label: y,
-                                                                     keep_prob: 1.0})
+                                                                     keep_prob_freeze: 1.0, keep_prob: 1.0})
             validation_loss += (loss * X.shape[0])
             validation_accuracy += (accuracy * X.shape[0])
         
@@ -240,10 +242,11 @@ def run():
         training_image_paths, validation_image_paths = train_test_split(image_paths, test_size=0.2)
 
         # TODO: Train NN using the train_nn function
-        vgg_input, vgg_keep_prob, vgg_layer3, vgg_layer4, vgg_layer7 = load_vgg(sess, vgg_path)
-        output_layer = layers(vgg_layer3, vgg_layer4, vgg_layer7, num_classes, vgg_keep_prob)
+        vgg_input, vgg_keep_prob_freeze, vgg_layer3, vgg_layer4, vgg_layer7 = load_vgg(sess, vgg_path)
+        output_layer = layers(vgg_layer3, vgg_layer4, vgg_layer7, num_classes, vgg_keep_prob_freeze)
         label = tf.placeholder(tf.int8, (None,) + image_shape + (num_classes,), name="label")
         learning_rate = tf.placeholder(tf.float32, [], name="learning_rate")
+        vgg_keep_prob = tf.placeholder(tf.float32, [], name="keep_prob_new")
         output_layer, training_operation, cross_entropy, accuracy_operation = optimize(output_layer, label, learning_rate,
                                                                            num_classes)
         if FREEZE_WEIGHTS:
@@ -253,12 +256,12 @@ def run():
             sess.run(tf.global_variables_initializer())
         
         train_nn(sess, EPOCHS, BATCH_SIZE, training_operation, accuracy_operation, cross_entropy, vgg_input,
-             label, vgg_keep_prob, learning_rate, training_image_paths, validation_image_paths, data_dir, image_shape)
+             label, vgg_keep_prob_freeze, vgg_keep_prob, learning_rate, training_image_paths, validation_image_paths, data_dir, image_shape)
 
         # TODO: Save inference data using helper.save_inference_samples
         #  helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image)
         helper.save_inference_samples(runs_dir=runs_dir, data_dir=data_dir, sess=sess,image_shape=image_shape,
-                                      logits=output_layer, keep_prob=vgg_keep_prob,
+                                      logits=output_layer, keep_prob_freeze=vgg_keep_prob_freeze, keep_prob=vgg_keep_prob, 
                                       input_image=vgg_input)
         # OPTIONAL: Apply the trained model to a video
 
