@@ -98,7 +98,7 @@ def test_optimize(optimize):
     layers_output = tf.Variable(tf.zeros(shape))
     correct_label = tf.placeholder(tf.float32, [None, None, None, num_classes])
     learning_rate = tf.placeholder(tf.float32)
-    logits, train_op, cross_entropy_loss, accuracy = optimize(layers_output, correct_label, learning_rate, num_classes)
+    logits, train_op, cross_entropy_loss = optimize(layers_output, correct_label, learning_rate, num_classes)
 
     _assert_tensor_shape(logits, [2*3*4, num_classes], 'Logits')
 
@@ -125,27 +125,18 @@ def test_train_nn(train_nn):
     correct_label = tf.placeholder(tf.float32, name='correct_label')
     keep_prob = tf.placeholder(tf.float32, name='keep_prob')
     learning_rate = tf.placeholder(tf.float32, name='learning_rate')
-    training_image_paths = ['']
-    validation_image_paths = ['']
-    data_dir = ''
-    image_shape = (160, 576)
-    print("train nn test")
     with tf.Session() as sess:
         parameters = {
             'sess': sess,
             'epochs': epochs,
             'batch_size': batch_size,
-            #'get_batches_fn': get_batches_fn,
+            'get_batches_fn': get_batches_fn,
             'train_op': train_op,
             'cross_entropy_loss': cross_entropy_loss,
             'input_image': input_image,
             'correct_label': correct_label,
             'keep_prob': keep_prob,
-            'learning_rate': learning_rate,
-            'training_image_paths': training_image_paths,
-            'validation_image_paths': validation_image_paths,
-            'data_dir': data_dir,
-            'image_shape': image_shape}
+            'learning_rate': learning_rate}
         _prevent_print(train_nn, parameters)
 
 
